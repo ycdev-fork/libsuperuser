@@ -4,8 +4,13 @@ buildscript {
         jcenter()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:0.14.0'
+        classpath 'com.android.tools.build:gradle:0.14.4'
     }
+}
+
+ext {
+    compileSdkVersion = 21
+    buildToolsVersion = "21.1.1"
 }
 
 allprojects {
