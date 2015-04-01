@@ -40,6 +40,7 @@ import eu.chainfire.libsuperuser.StreamGobbler.OnLineListener;
 /**
  * Class providing functionality to execute commands in a (root) shell
  */
+@SuppressWarnings("unused")
 public class Shell {
     /**
      * <p>
@@ -48,7 +49,7 @@ public class Shell {
      * </p>
      * <p>
      * This method is deprecated and only provided for backwards compatibility.
-     * Use {@link #run(String, String[], String[], boolean)} instead, and see
+     * Use {@link #run(String, String[], String[], boolean, boolean)} instead, and see
      * that same method for usage notes.
      * </p>
      * 
@@ -59,7 +60,18 @@ public class Shell {
      */
     @Deprecated
     public static List<String> run(String shell, String[] commands, boolean wantSTDERR) {
-        return run(shell, commands, null, wantSTDERR);
+        return run(shell, commands, null, wantSTDERR, true);
+    }
+
+    /**
+     * This method is deprecated and only provided for backwards compatibility.
+     * Use {@link #run(String, String[], String[], boolean, boolean)} instead, and see
+     * that same method for usage notes.
+     */
+    @Deprecated
+    public static List<String> run(String shell, String[] commands, String[] environment,
+            boolean wantSTDERR) {
+        return run(shell, commands, environment, wantSTDERR, true);
     }
 
     /**
@@ -95,10 +107,11 @@ public class Shell {
      * @param environment List of all environment variables (in 'key=value'
      *            format) or null for defaults
      * @param wantSTDERR Return STDERR in the output ?
-     * @return Output of the commands, or null in case of an error
+     * @param wantSTDOUT Return STDOUT in the output ?
+     * @return Output of the commands. May be null if no output required or in case of an error
      */
     public static List<String> run(String shell, String[] commands, String[] environment,
-            boolean wantSTDERR) {
+            boolean wantSTDERR, boolean wantSTDOUT) {
         String shellUpper = shell.toUpperCase(Locale.ENGLISH);
 
         if (Debug.getSanityChecksEnabledEffective() && Debug.onMainThread()) {
@@ -111,7 +124,10 @@ public class Shell {
         }
         Debug.logCommand(String.format("[%s%%] START", shellUpper));
 
-        List<String> res = Collections.synchronizedList(new ArrayList<String>());
+        List<String> res = null;
+        if (wantSTDERR || wantSTDOUT) {
+            res = Collections.synchronizedList(new ArrayList<String>());
+        }
 
         try {
             // Combine passed environment with system environment
@@ -136,14 +152,19 @@ public class Shell {
             // gobblers
             Process process = Runtime.getRuntime().exec(shell, environment);
             DataOutputStream STDIN = new DataOutputStream(process.getOutputStream());
-            StreamGobbler STDOUT = new StreamGobbler(shellUpper + "-", process.getInputStream(),
-                    res);
-            StreamGobbler STDERR = new StreamGobbler(shellUpper + "*", process.getErrorStream(),
-                    wantSTDERR ? res : null);
 
             // start gobbling and write our commands to the shell
-            STDOUT.start();
-            STDERR.start();
+            StreamGobbler STDOUT = null;
+            if (wantSTDOUT) {
+                STDOUT = new StreamGobbler(shellUpper + "-", process.getInputStream(), res);
+                STDOUT.start();
+            }
+            StreamGobbler STDERR = null;
+            if (wantSTDERR) {
+                STDERR = new StreamGobbler(shellUpper + "*", process.getErrorStream(), res);
+                STDERR.start();
+            }
+
             for (String write : commands) {
                 Debug.logCommand(String.format("[%s+] %s", shellUpper, write));
                 STDIN.write((write + "\n").getBytes("UTF-8"));
@@ -169,10 +190,14 @@ public class Shell {
             // safe and do this on Android as well
             try {
                 STDIN.close();
-            } catch (IOException e) {
+            } catch (IOException ignored) {
             }
-            STDOUT.join();
-            STDERR.join();
+            if (STDOUT != null) {
+                STDOUT.join();
+            }
+            if (STDERR != null) {
+                STDERR.join();
+            }
             process.destroy();
 
             // in case of su, 255 usually indicates access denied
@@ -241,7 +266,7 @@ public class Shell {
         public static List<String> run(String command) {
             return Shell.run("sh", new String[] {
                     command
-            }, null, false);
+            }, null, false, true);
         }
 
         /**
@@ -251,7 +276,7 @@ public class Shell {
          * @return Output of the commands, or null in case of an error
          */
         public static List<String> run(List<String> commands) {
-            return Shell.run("sh", commands.toArray(new String[commands.size()]), null, false);
+            return Shell.run("sh", commands.toArray(new String[commands.size()]), null, false, true);
         }
 
         /**
@@ -261,7 +286,7 @@ public class Shell {
          * @return Output of the commands, or null in case of an error
          */
         public static List<String> run(String[] commands) {
-            return Shell.run("sh", commands, null, false);
+            return Shell.run("sh", commands, null, false, true);
         }
     }
 
@@ -286,7 +311,7 @@ public class Shell {
         public static List<String> run(String command) {
             return Shell.run("su", new String[] {
                     command
-            }, null, false);
+            }, null, false, true);
         }
 
         /**
@@ -297,7 +322,7 @@ public class Shell {
          *         case of an error
          */
         public static List<String> run(List<String> commands) {
-            return Shell.run("su", commands.toArray(new String[commands.size()]), null, false);
+            return Shell.run("su", commands.toArray(new String[commands.size()]), null, false, true);
         }
 
         /**
@@ -308,7 +333,7 @@ public class Shell {
          *         case of an error
          */
         public static List<String> run(String[] commands) {
-            return Shell.run("su", commands, null, false);
+            return Shell.run("su", commands, null, false, true);
         }
 
         /**
@@ -355,7 +380,8 @@ public class Shell {
                         internal ? "su -V" : "su -v",
                         new String[] {},
                         null,
-                        false
+                        false,
+                        true
                         );
 
                 if (ret != null) {
@@ -371,7 +397,7 @@ public class Shell {
                                     version = line;
                                     break;
                                 }
-                            } catch (NumberFormatException e) {
+                            } catch (NumberFormatException ignored) {
                             }
                         }
                     }
@@ -477,7 +503,7 @@ public class Shell {
                                 } finally {
                                     is.close();
                                 }
-                            } catch (Exception e) {
+                            } catch (Exception ignored) {
                             }
                         }
                     }
@@ -988,8 +1014,8 @@ public class Shell {
         private volatile int callbacks = 0;
         private volatile int watchdogCount;
 
-        private Object idleSync = new Object();
-        private Object callbackSync = new Object();
+        private final Object idleSync = new Object();
+        private final Object callbackSync = new Object();
 
         private volatile int lastExitCode = 0;
         private volatile String lastMarkerSTDOUT = null;
@@ -1030,7 +1056,7 @@ public class Shell {
                 commands.add(0, new Command(Shell.availableTestCommands, 0, new OnCommandResultListener() {
                     public void onCommandResult(int commandCode, int exitCode, List<String> output) {
                         if (exitCode == OnCommandResultListener.SHELL_RUNNING &&
-                                Shell.parseAvailableResult(output, Shell.SU.isSU(shell)) != true) {
+                                !Shell.parseAvailableResult(output, SU.isSU(shell))) {
                             // shell is up, but it's brain-damaged
                             exitCode = OnCommandResultListener.SHELL_WRONG_UID;
                         }
@@ -1319,7 +1345,7 @@ public class Shell {
                         STDIN.write(("echo " + command.marker + " $?\n").getBytes("UTF-8"));
                         STDIN.write(("echo " + command.marker + " >&2\n").getBytes("UTF-8"));
                         STDIN.flush();
-                    } catch (IOException e) {
+                    } catch (IOException ignored) {
                     }
                 } else {
                     runNextCommand(false);
@@ -1606,11 +1632,11 @@ public class Shell {
 
             try {
                 STDIN.close();
-            } catch (IOException e) {
+            } catch (IOException ignored) {
             }
             try {
                 process.destroy();
-            } catch (Exception e) {
+            } catch (Exception ignored) {
             }
         }
 
@@ -1627,7 +1653,7 @@ public class Shell {
                 // if this throws, we're still running
                 process.exitValue();
                 return false;
-            } catch (IllegalThreadStateException e) {
+            } catch (IllegalThreadStateException ignored) {
             }
             return true;
         }
