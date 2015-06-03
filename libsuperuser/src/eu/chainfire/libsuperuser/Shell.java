@@ -165,18 +165,26 @@ public class Shell {
                 STDERR.start();
             }
 
-            for (String write : commands) {
-                Debug.logCommand(String.format("[%s+] %s", shellUpper, write));
-                STDIN.write((write + "\n").getBytes("UTF-8"));
-                STDIN.flush();
-            }
+
             try {
+                for (String write : commands) {
+                    Debug.logCommand(String.format("[%s+] %s", shellUpper, write));
+                    STDIN.write((write + "\n").getBytes("UTF-8"));
+                    STDIN.flush();
+                }
                 STDIN.write("exit\n".getBytes("UTF-8"));
                 STDIN.flush();
             } catch (IOException e) {
-                // happens if the script already contains the exit line - if
-                // there were a more serious issue, it would already have thrown
-                // an exception while writing the script to STDIN
+                if (e.getMessage().contains("EPIPE")) {
+                    // method most horrid to catch broken pipe, in which case we
+                    // do nothing. the command is not a shell, the shell closed
+                    // STDIN, the script already contained the exit command, etc.
+                    // these cases we want the output instead of returning null
+                } else {
+                    // other issues we don't know how to handle, leads to
+                    // returning null
+                    throw e;
+                }
             }
 
             // wait for our process to finish, while we gobble away in the
@@ -190,7 +198,8 @@ public class Shell {
             // safe and do this on Android as well
             try {
                 STDIN.close();
-            } catch (IOException ignored) {
+            } catch (IOException e) {
+                // might be closed already
             }
             if (STDOUT != null) {
                 STDOUT.join();
@@ -387,7 +396,7 @@ public class Shell {
                 if (ret != null) {
                     for (String line : ret) {
                         if (!internal) {
-                            if (line.contains(".")) {
+                            if (!line.trim().equals("")) {
                                 version = line;
                                 break;
                             }
@@ -397,7 +406,8 @@ public class Shell {
                                     version = line;
                                     break;
                                 }
-                            } catch (NumberFormatException ignored) {
+                            } catch (NumberFormatException e) {
+                                // should be parsable, try next line otherwise
                             }
                         }
                     }
@@ -493,18 +503,17 @@ public class Shell {
                 // leak
                 if (android.os.Build.VERSION.SDK_INT >= 17) {
                     // Detect enforcing through sysfs, not always present
-                    if (enforcing == null) {
-                        File f = new File("/sys/fs/selinux/enforce");
-                        if (f.exists()) {
+                    File f = new File("/sys/fs/selinux/enforce");
+                    if (f.exists()) {
+                        try {
+                            InputStream is = new FileInputStream("/sys/fs/selinux/enforce");
                             try {
-                                InputStream is = new FileInputStream("/sys/fs/selinux/enforce");
-                                try {
-                                    enforcing = (is.read() == '1');
-                                } finally {
-                                    is.close();
-                                }
-                            } catch (Exception ignored) {
+                                enforcing = (is.read() == '1');
+                            } finally {
+                                is.close();
                             }
+                        } catch (Exception e) {
+                            // we might not be allowed to read, thanks SELinux
                         }
                     }
 
@@ -543,13 +552,13 @@ public class Shell {
 
     private interface OnResult {
         // for any onCommandResult callback
-        public static final int WATCHDOG_EXIT = -1;
-        public static final int SHELL_DIED = -2;
+        int WATCHDOG_EXIT = -1;
+        int SHELL_DIED = -2;
 
         // for Interactive.open() callbacks only
-        public static final int SHELL_EXEC_FAILED = -3;
-        public static final int SHELL_WRONG_UID = -4;
-        public static final int SHELL_RUNNING = 0;
+        int SHELL_EXEC_FAILED = -3;
+        int SHELL_WRONG_UID = -4;
+        int SHELL_RUNNING = 0;
     }
 
     /**
@@ -576,7 +585,7 @@ public class Shell {
          * @param exitCode Exit code of the last command in the block
          * @param output All output generated by the command block
          */
-        public void onCommandResult(int commandCode, int exitCode, List<String> output);
+        void onCommandResult(int commandCode, int exitCode, List<String> output);
     }
 
     /**
@@ -603,7 +612,7 @@ public class Shell {
          * @param commandCode Value previously supplied to addCommand
          * @param exitCode Exit code of the last command in the block
          */
-        public void onCommandResult(int commandCode, int exitCode);
+        void onCommandResult(int commandCode, int exitCode);
     }
 
     /**
@@ -1055,8 +1064,8 @@ public class Shell {
                 watchdogTimeout = 60;
                 commands.add(0, new Command(Shell.availableTestCommands, 0, new OnCommandResultListener() {
                     public void onCommandResult(int commandCode, int exitCode, List<String> output) {
-                        if (exitCode == OnCommandResultListener.SHELL_RUNNING &&
-                                !Shell.parseAvailableResult(output, SU.isSU(shell))) {
+                        if ((exitCode == OnCommandResultListener.SHELL_RUNNING) &&
+                                !Shell.parseAvailableResult(output, Shell.SU.isSU(shell))) {
                             // shell is up, but it's brain-damaged
                             exitCode = OnCommandResultListener.SHELL_WRONG_UID;
                         }
@@ -1345,7 +1354,8 @@ public class Shell {
                         STDIN.write(("echo " + command.marker + " $?\n").getBytes("UTF-8"));
                         STDIN.write(("echo " + command.marker + " >&2\n").getBytes("UTF-8"));
                         STDIN.flush();
-                    } catch (IOException ignored) {
+                    } catch (IOException e) {
+                        // STDIN might have closed
                     }
                 } else {
                     runNextCommand(false);
@@ -1516,6 +1526,8 @@ public class Shell {
                                             lastExitCode = Integer.valueOf(
                                                     line.substring(command.marker.length() + 1), 10);
                                         } catch (Exception e) {
+                                            // this really shouldn't happen
+                                            e.printStackTrace();
                                         }
                                         lastMarkerSTDOUT = command.marker;
                                         processMarker();
@@ -1592,8 +1604,17 @@ public class Shell {
                 waitForIdle();
 
             try {
-                STDIN.write(("exit\n").getBytes("UTF-8"));
-                STDIN.flush();
+                try {
+                    STDIN.write(("exit\n").getBytes("UTF-8"));
+                    STDIN.flush();
+                } catch (IOException e) {
+                    if (e.getMessage().contains("EPIPE")) {
+                        // we're not running a shell, the shell closed STDIN,
+                        // the script already contained the exit command, etc.
+                    } else {
+                        throw e;
+                    }
+                }
 
                 // wait for our process to finish, while we gobble away in the
                 // background
@@ -1607,13 +1628,14 @@ public class Shell {
                 try {
                     STDIN.close();
                 } catch (IOException e) {
+                    // STDIN going missing is no reason to abort
                 }
                 STDOUT.join();
                 STDERR.join();
                 stopWatchdog();
                 process.destroy();
             } catch (IOException e) {
-                // shell probably not found
+                // various unforseen IO errors may still occur
             } catch (InterruptedException e) {
                 // this should really be re-thrown
             }
@@ -1632,11 +1654,13 @@ public class Shell {
 
             try {
                 STDIN.close();
-            } catch (IOException ignored) {
+            } catch (IOException e) {
+                // in case it was closed
             }
             try {
                 process.destroy();
-            } catch (Exception ignored) {
+            } catch (Exception e) {
+                // in case it was already destroyed or can't be
             }
         }
 
@@ -1650,10 +1674,10 @@ public class Shell {
                 return false;
             }
             try {
-                // if this throws, we're still running
                 process.exitValue();
                 return false;
-            } catch (IllegalThreadStateException ignored) {
+            } catch (IllegalThreadStateException e) {
+                // if this is thrown, we're still running
             }
             return true;
         }
