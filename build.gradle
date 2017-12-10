@@ -1,4 +1,9 @@
-apply from: "${rootDir}/android_project_common.gradle"
+ext {
+    androidProjectCommon = "https://raw.githubusercontent.com/yongce/AndroidLib/e5d103285d9680fc816fd979efa7b0d8bc154130/android_project_common.gradle"
+    androidModuleCommon = "https://raw.githubusercontent.com/yongce/AndroidLib/e5d103285d9680fc816fd979efa7b0d8bc154130/android_module_common.gradle"
+}
+
+apply from: "${androidProjectCommon}"
 
 buildscript {
     repositories {
