@@ -1,13 +1,11 @@
 apply plugin: 'com.android.application'
+apply from: "${rootDir}/android_module_common.gradle"
 
 dependencies {
-    compile project(':libsuperuser')
+    implementation project(':libsuperuser')
 }
 
 android {
-    compileSdkVersion rootProject.ext.compileSdkVersion
-    buildToolsVersion rootProject.ext.buildToolsVersion
-
     sourceSets {
         main {
             manifest.srcFile 'AndroidManifest.xml'
@@ -18,8 +16,5 @@ android {
             res.srcDirs = ['res']
             assets.srcDirs = ['assets']
         }
-    }
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_6
     }
 }

@@ -1,22 +1,23 @@
+apply from: "${rootDir}/android_project_common.gradle"
+
 buildscript {
     repositories {
         jcenter()
+        google()
     }
-
     dependencies {
-        classpath 'com.android.tools.build:gradle:2.0.0'
-        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.6'
-        classpath 'com.github.dcendents:android-maven-gradle-plugin:1.3'
+        classpath 'com.android.tools.build:gradle:3.0.1'
     }
-}
-
-ext {
-    compileSdkVersion = 22
-    buildToolsVersion = "22.0.1"
 }
 
 allprojects {
     repositories {
         jcenter()
+        google()
     }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+    delete rootProject.ext.appsOutDir
 }
